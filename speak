@@ -11,6 +11,8 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 
 IMAGE="speak:latest"
+CONTAINER="speak-server"
+PORT=9800
 
 VOICE="Vivian"
 OUTPUT=""
@@ -30,11 +32,25 @@ Options:
   --instruct, -i   Voice style instruction, e.g. "whisper" or "Very happy." (optional)
   --help, -h       Show this help
 
+Server management:
+  --stop           Stop the background TTS server
+
 Examples:
   speak -o hello.wav "Hello world"
   speak -v ryan -o greeting.wav "Hi there"
   speak -i "whisper" -o secret.wav "This is a secret"
+  speak --stop
 EOF
+    exit 0
+}
+
+stop_server() {
+    if docker container inspect "$CONTAINER" &>/dev/null; then
+        docker rm -f "$CONTAINER" &>/dev/null
+        echo "Server stopped." >&2
+    else
+        echo "Server is not running." >&2
+    fi
     exit 0
 }
 
@@ -47,6 +63,8 @@ while [[ $# -gt 0 ]]; do
             OUTPUT="$2"; shift 2 ;;
         --instruct|-i)
             INSTRUCT="$2"; shift 2 ;;
+        --stop)
+            stop_server ;;
         --help|-h)
             usage ;;
         -*)
@@ -74,27 +92,52 @@ if ! docker image inspect "$IMAGE" &>/dev/null; then
     docker build -t "$IMAGE" "$SCRIPT_DIR"
 fi
 
+# Start server if not running
+if ! docker container inspect "$CONTAINER" &>/dev/null; then
+    echo "Starting TTS server (loading model ~30s)..." >&2
+    docker run -d --gpus all --ipc=host \
+        --name "$CONTAINER" \
+        --entrypoint python \
+        -e HF_HUB_OFFLINE=1 \
+        -p "$PORT:$PORT" \
+        -v "$SCRIPT_DIR:/opt/speak:ro" \
+        "$IMAGE" \
+        -u /opt/speak/server.py \
+        > /dev/null
+
+    # Wait for server to be ready
+    while ! curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1; do
+        # Check if container died
+        if ! docker container inspect "$CONTAINER" &>/dev/null; then
+            echo "Error: server failed to start. Check: docker logs $CONTAINER" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    echo "Server ready." >&2
+fi
+
 # Resolve output to absolute path
 case "$OUTPUT" in
     /*) ABS_OUTPUT="$OUTPUT" ;;
     *)  ABS_OUTPUT="$(pwd)/$OUTPUT" ;;
 esac
-OUTPUT_DIR="$(dirname "$ABS_OUTPUT")"
-OUTPUT_FILE="$(basename "$ABS_OUTPUT")"
 
-INSTRUCT_ARGS=()
-if [[ -n "$INSTRUCT" ]]; then
-    INSTRUCT_ARGS=(--instruct "$INSTRUCT")
+# Build JSON payload
+JSON=$(printf '{"text":%s,"voice":%s,"instruct":%s}' \
+    "$(printf '%s' "$TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+    "$(printf '%s' "$VOICE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+    "$(printf '%s' "$INSTRUCT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+
+HTTP_CODE=$(curl -sf -o "$ABS_OUTPUT" -w "%{http_code}" \
+    -X POST "http://localhost:$PORT/generate" \
+    -H "Content-Type: application/json" \
+    -d "$JSON")
+
+if [[ "$HTTP_CODE" != "200" ]]; then
+    echo "Error: server returned HTTP $HTTP_CODE" >&2
+    rm -f "$ABS_OUTPUT"
+    exit 1
 fi
 
-exec docker run --gpus all --rm --ipc=host \
-    --entrypoint python \
-    -e HF_HUB_OFFLINE=1 \
-    -v "$SCRIPT_DIR:/opt/speak:ro" \
-    -v "$OUTPUT_DIR:/output" \
-    "$IMAGE" \
-    -u /opt/speak/generate.py \
-        --text "$TEXT" \
-        --voice "$VOICE" \
-        --output "/output/$OUTPUT_FILE" \
-        "${INSTRUCT_ARGS[@]}"
+echo "Saved to $ABS_OUTPUT" >&2

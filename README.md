@@ -2,7 +2,7 @@
 
 A CLI tool for text-to-speech using [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) on NVIDIA GPUs.
 
-Wraps the Qwen3-TTS CustomVoice model in a Docker container so you can generate speech from your host machine with a single command.
+Wraps the Qwen3-TTS CustomVoice model in a Docker container with a persistent server, so the model loads once and subsequent requests take ~2s.
 
 ## Requirements
 
@@ -30,7 +30,12 @@ Options:
   --output, -o     Output .wav path (required)
   --instruct, -i   Voice style instruction, e.g. "whisper" or "Very happy." (optional)
   --help, -h       Show this help
+
+Server management:
+  --stop           Stop the background TTS server
 ```
+
+On first invocation, `speak` starts a background Docker container that loads the model (~30s). Subsequent calls hit the warm server and return in ~2s. The server persists across calls until you run `speak --stop` or reboot.
 
 ### Available voices
 
@@ -54,15 +59,15 @@ speak -v ryan -o greeting.wav "Good morning everyone"
 speak -i "whisper" -o secret.wav "This is a secret"
 speak -i "Very happy." -o excited.wav "I just got promoted!"
 speak -v sohee -o korean.wav "안녕하세요"
+speak --stop  # stop the background server
 ```
 
 ## How it works
 
-1. On first run, builds a Docker image (`speak:latest`) from `nvcr.io/nvidia/pytorch:25.11-py3` with all dependencies and model weights baked in
-2. Runs `generate.py` inside the container with GPU access
-3. Generates audio and writes a `.wav` file to your specified output path
-
-Typical generation takes ~2-3s for a short sentence (RTF ~1.3x on DGX Spark).
+1. On first run, builds a Docker image (`speak:latest`) with all dependencies and model weights baked in
+2. First `speak` call starts a persistent server container (`speak-server`) that loads the model once
+3. Requests are sent to the server over HTTP, which generates audio and returns wav bytes
+4. Server stays running for instant subsequent calls (~2s per request)
 
 ## License
 
