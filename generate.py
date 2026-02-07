@@ -15,9 +15,24 @@ import logging
 
 logging.disable(logging.WARNING)
 
+from pathlib import Path
+
 import soundfile as sf
 import torch
 from qwen_tts import Qwen3TTSModel
+
+MODEL_HUB_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_CACHE = Path.home() / ".cache/huggingface/hub" / ("models--" + MODEL_HUB_ID.replace("/", "--"))
+
+
+def resolve_model_path():
+    """Use local snapshot if available, otherwise fall back to hub ID."""
+    snapshots = MODEL_CACHE / "snapshots"
+    if snapshots.is_dir():
+        revs = sorted(snapshots.iterdir())
+        if revs:
+            return str(revs[-1])
+    return MODEL_HUB_ID
 
 
 def main():
@@ -29,10 +44,11 @@ def main():
     parser.add_argument("--instruct", default="", help="Voice style instruction")
     args = parser.parse_args()
 
-    print("Loading model...", file=sys.stderr)
+    model_path = resolve_model_path()
+    print(f"Loading model...", file=sys.stderr)
     t0 = time.time()
     model = Qwen3TTSModel.from_pretrained(
-        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        model_path,
         device_map="cuda:0",
         dtype=torch.bfloat16,
     )

@@ -89,7 +89,7 @@ fi
 
 exec docker run --gpus all --rm --ipc=host \
     --entrypoint python \
-    -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+    -e HF_HUB_OFFLINE=1 \
     -v "$SCRIPT_DIR:/opt/speak:ro" \
     -v "$OUTPUT_DIR:/output" \
     "$IMAGE" \
