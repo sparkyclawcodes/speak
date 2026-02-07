@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+IMAGE="speak:latest"
+
+VOICE="Vivian"
+OUTPUT="output.wav"
+TEXT=""
+
+usage() {
+    cat <<'EOF'
+Usage: speak [OPTIONS] TEXT
+
+Generate speech from text using Qwen3-TTS.
+
+Options:
+  --voice, -v   Speaker voice (default: Vivian)
+                 Available: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian
+  --output, -o  Output .wav path (default: output.wav)
+  --help, -h    Show this help
+
+Examples:
+  speak "Hello world"
+  speak -v ryan -o greeting.wav "Hi there"
+EOF
+    exit 0
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --voice|-v)
+            VOICE="$2"; shift 2 ;;
+        --output|-o)
+            OUTPUT="$2"; shift 2 ;;
+        --help|-h)
+            usage ;;
+        -*)
+            echo "Unknown option: $1" >&2; exit 1 ;;
+        *)
+            TEXT="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$TEXT" ]]; then
+    echo "Error: no text provided" >&2
+    echo "Usage: speak [OPTIONS] TEXT" >&2
+    exit 1
+fi
+
+# Build image if it doesn't exist
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+    echo "Building $IMAGE (one-time)..." >&2
+    docker build -t "$IMAGE" "$SCRIPT_DIR"
+fi
+
+# Resolve output to absolute path
+case "$OUTPUT" in
+    /*) ABS_OUTPUT="$OUTPUT" ;;
+    *)  ABS_OUTPUT="$(pwd)/$OUTPUT" ;;
+esac
+OUTPUT_DIR="$(dirname "$ABS_OUTPUT")"
+OUTPUT_FILE="$(basename "$ABS_OUTPUT")"
+
+exec docker run --gpus all --rm --ipc=host \
+    -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+    -v "$SCRIPT_DIR:/opt/speak:ro" \
+    -v "$OUTPUT_DIR:/output" \
+    "$IMAGE" \
+    python /opt/speak/generate.py \
+        --text "$TEXT" \
+        --voice "$VOICE" \
+        --output "/output/$OUTPUT_FILE"
