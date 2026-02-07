@@ -2,7 +2,7 @@ FROM nvcr.io/nvidia/pytorch:25.11-py3
 RUN pip install --no-cache-dir \
     torchaudio --index-url https://download.pytorch.org/whl/cu130
 RUN pip install --no-cache-dir \
-    qwen-tts soundfile onnxruntime sox
+    qwen-tts soundfile onnxruntime sox websockets
 # Download and cache the model weights inside the image
 RUN python -c "\
 from qwen_tts import Qwen3TTSModel; \

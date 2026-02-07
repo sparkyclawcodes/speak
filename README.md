@@ -1,8 +1,8 @@
 # speak
 
-A CLI tool for text-to-speech using [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) on NVIDIA GPUs.
+A CLI tool and API for text-to-speech using [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) on NVIDIA GPUs.
 
-Wraps the Qwen3-TTS CustomVoice model in a Docker container with a persistent server, so the model loads once and subsequent requests take ~2s.
+Wraps the Qwen3-TTS CustomVoice model in a Docker container with a persistent server. The model loads once and subsequent requests take ~2s.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ ln -s "$(pwd)/speak/speak" ~/.local/bin/speak
 
 The Docker image builds automatically on first run (~5 min, one-time). Model weights are baked into the image.
 
-## Usage
+## CLI Usage
 
 ```
 speak [OPTIONS] -o OUTPUT TEXT
@@ -30,12 +30,61 @@ Options:
   --output, -o     Output .wav path (required)
   --instruct, -i   Voice style instruction, e.g. "whisper" or "Very happy." (optional)
   --help, -h       Show this help
-
-Server management:
   --stop           Stop the background TTS server
 ```
 
-On first invocation, `speak` starts a background Docker container that loads the model (~30s). Subsequent calls hit the warm server and return in ~2s. The server persists across calls until you run `speak --stop` or reboot.
+### Examples
+
+```bash
+speak -o hello.wav "Hello world"
+speak -v ryan -o greeting.wav "Good morning everyone"
+speak -i "whisper" -o secret.wav "This is a secret"
+speak --stop
+```
+
+## Streaming API
+
+WebSocket endpoint for streaming audio output, suitable for phone call APIs and real-time applications.
+
+```
+ws://localhost:9800/ws/stream
+```
+
+**Protocol:**
+```
+Client sends: JSON {"text": "...", "voice": "...", "instruct": "...", "language": "..."}
+Server sends: binary (int16 PCM, 24kHz mono) in 1-second chunks
+Server sends: JSON {"done": true, "duration": float, "sample_rate": 24000}
+```
+
+**Example (Python):**
+```python
+import asyncio, json, websockets
+
+async def stream_tts():
+    async with websockets.connect("ws://localhost:9800/ws/stream") as ws:
+        await ws.send(json.dumps({"text": "Hello world", "voice": "Vivian"}))
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, bytes):
+                # int16 PCM audio chunk — play or forward
+                process_audio(msg)
+            else:
+                data = json.loads(msg)
+                if data.get("done"):
+                    break
+
+asyncio.run(stream_tts())
+```
+
+### REST API
+
+```
+POST http://localhost:9800/generate
+Content-Type: application/json
+{"text": "...", "voice": "...", "instruct": "...", "language": "..."}
+→ audio/wav
+```
 
 ### Available voices
 
@@ -51,23 +100,9 @@ On first invocation, `speak` starts a background Docker container that loads the
 | `ono_anna` | Playful Japanese female, light nimble timbre | Japanese |
 | `sohee` | Warm Korean female with rich emotion | Korean |
 
-### Examples
+## Companion tool
 
-```bash
-speak -o hello.wav "Hello world"
-speak -v ryan -o greeting.wav "Good morning everyone"
-speak -i "whisper" -o secret.wav "This is a secret"
-speak -i "Very happy." -o excited.wav "I just got promoted!"
-speak -v sohee -o korean.wav "안녕하세요"
-speak --stop  # stop the background server
-```
-
-## How it works
-
-1. On first run, builds a Docker image (`speak:latest`) with all dependencies and model weights baked in
-2. First `speak` call starts a persistent server container (`speak-server`) that loads the model once
-3. Requests are sent to the server over HTTP, which generates audio and returns wav bytes
-4. Server stays running for instant subsequent calls (~2s per request)
+See [listen](https://github.com/sparkyclawcodes/listen) for speech-to-text using NVIDIA Parakeet-TDT.
 
 ## License
 
