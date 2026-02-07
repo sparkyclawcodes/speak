@@ -2,8 +2,18 @@
 """Generate speech from text using Qwen3-TTS CustomVoice model."""
 
 import argparse
+import os
 import sys
 import time
+import warnings
+
+# Silence noisy warnings before any imports trigger them
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+import logging
+
+logging.disable(logging.WARNING)
 
 import soundfile as sf
 import torch
@@ -16,6 +26,7 @@ def main():
     parser.add_argument("--voice", default="Vivian", help="Speaker voice")
     parser.add_argument("--output", required=True, help="Output .wav path")
     parser.add_argument("--language", default="English", help="Language")
+    parser.add_argument("--instruct", default="", help="Voice style instruction")
     args = parser.parse_args()
 
     print("Loading model...", file=sys.stderr)
@@ -28,13 +39,19 @@ def main():
     t_load = time.time() - t0
     print(f"Model loaded in {t_load:.1f}s", file=sys.stderr)
 
-    print(f"Generating speech (voice={args.voice})...", file=sys.stderr)
+    instruct_msg = f", instruct={args.instruct!r}" if args.instruct else ""
+    print(f"Generating speech (voice={args.voice}{instruct_msg})...", file=sys.stderr)
     t0 = time.time()
-    wavs, sample_rate = model.generate_custom_voice(
+
+    kwargs = dict(
         text=args.text,
         speaker=args.voice,
         language=args.language,
     )
+    if args.instruct:
+        kwargs["instruct"] = args.instruct
+
+    wavs, sample_rate = model.generate_custom_voice(**kwargs)
     t_gen = time.time() - t0
 
     wav = wavs[0]
